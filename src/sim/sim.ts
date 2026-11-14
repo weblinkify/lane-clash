@@ -114,6 +114,12 @@ export function canApply(state: State, cmd: Command): boolean {
 
 /** Applies one command. Returns false, changing nothing, if it is not allowed. */
 export function applyCommand(state: State, cmd: Command): boolean {
+  const applied = resolveCommand(state, cmd);
+  if (applied) checkTowers(state);
+  return applied;
+}
+
+function resolveCommand(state: State, cmd: Command): boolean {
   if (!canApply(state, cmd)) return false;
   const card: Card = CARDS[cmd.card];
   state.energy[cmd.side] -= card.cost;
@@ -144,7 +150,6 @@ export function applyCommand(state: State, cmd: Command): boolean {
   }
   state.effects.push({ card: cmd.card, side: cmd.side, x: cmd.x, y: cmd.y, tick: state.tick });
   removeDead(state);
-  checkTowers(state);
   return true;
 }
 
@@ -184,16 +189,21 @@ function checkTowers(state: State): void {
 export function step(state: State, commands: readonly Command[] = []): void {
   if (state.winner !== null) return;
 
-  for (const cmd of commands) applyCommand(state, cmd);
+  // Spells resolve before placements and the towers are checked once at the end, so the order
+  // in which the two sides' commands arrive within a tick never matters.
+  for (const cmd of commands) if (CARDS[cmd.card].type === 'spell') resolveCommand(state, cmd);
+  for (const cmd of commands) if (CARDS[cmd.card].type === 'unit') resolveCommand(state, cmd);
+  checkTowers(state);
   if (state.winner !== null) return;
 
   for (const side of [0, 1] as const) {
     state.energy[side] = Math.min(ENERGY.max, state.energy[side] + ENERGY.perSecond / TICK_RATE);
   }
 
-  // Everyone chooses and acts on the same snapshot of health; damage lands together afterwards,
-  // so neither side gains an edge from update order.
+  // Everyone decides from the same snapshot of positions and health; moves and damage land
+  // together afterwards, so neither side gains an edge from update order.
   const hits: { target: Unit | Tower; damage: number }[] = [];
+  const moves: { unit: Unit; x: number; y: number }[] = [];
   for (const unit of state.units) {
     const stats: UnitStats = UNITS[unit.kind];
     if (unit.cooldown > 0) unit.cooldown--;
@@ -211,11 +221,14 @@ export function step(state: State, commands: readonly Command[] = []): void {
       }
     } else {
       const stride = Math.min(stats.speed / TICK_RATE, dist - reach);
-      unit.x += (dx / dist) * stride;
-      unit.y += (dy / dist) * stride;
+      moves.push({ unit, x: unit.x + (dx / dist) * stride, y: unit.y + (dy / dist) * stride });
     }
   }
 
+  for (const move of moves) {
+    move.unit.x = move.x;
+    move.unit.y = move.y;
+  }
   for (const hit of hits) hit.target.hp = Math.max(0, hit.target.hp - hit.damage);
   removeDead(state);
   state.effects = state.effects.filter((e) => state.tick - e.tick < EFFECT_TICKS);

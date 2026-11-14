@@ -31,3 +31,25 @@ export function showOverlay(title: string, subtitle: string, buttons: OverlayBut
 export function hideOverlay(): void {
   overlay.hidden = true;
 }
+
+// The win count lives in localStorage. Storage can be unavailable (private mode), so every
+// access is guarded and the game simply shows 0.
+const WINS_KEY = 'lane-clash:wins';
+
+export function getWins(): number {
+  try {
+    return Number(localStorage.getItem(WINS_KEY)) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function addWin(): number {
+  const wins = getWins() + 1;
+  try {
+    localStorage.setItem(WINS_KEY, String(wins));
+  } catch {
+    // Nothing to do: the count just will not persist.
+  }
+  return wins;
+}

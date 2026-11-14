@@ -16,6 +16,14 @@ services:
       - .:/app
       - /app/node_modules
 
+  # Balance table: 200 bot-vs-bot matches. Flags: docker compose run --rm sim npm run sim -- --seed 7
+  sim:
+    build: { context: ., target: deps }
+    command: npm run sim
+    volumes:
+      - .:/app
+      - /app/node_modules
+
   # Production build served by nginx at http://localhost:8080
   web:
     build: { context: ., target: runtime }

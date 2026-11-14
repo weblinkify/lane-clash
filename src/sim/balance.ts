@@ -11,7 +11,7 @@ export const FIELD = {
 } as const;
 
 export const TOWER = {
-  hp: 1000,
+  hp: 2500,
   /** Units hit the tower from its edge, not its centre. */
   radius: 4,
   /** Distance from the tower centre to its own end of the field. */
@@ -38,9 +38,9 @@ export interface UnitStats {
 }
 
 export const UNITS = {
-  boulder: { emoji: '🪨', hp: 600, damage: 45, attackInterval: 1.5, range: 2, sight: 20, speed: 6 },
+  boulder: { emoji: '🪨', hp: 540, damage: 40, attackInterval: 1.5, range: 2, sight: 20, speed: 6 },
   slinger: { emoji: '🎯', hp: 140, damage: 35, attackInterval: 1.0, range: 22, sight: 26, speed: 9 },
-  gnat: { emoji: '🐝', hp: 45, damage: 14, attackInterval: 0.6, range: 2, sight: 20, speed: 14 },
+  gnat: { emoji: '🐝', hp: 45, damage: 8, attackInterval: 0.6, range: 2, sight: 20, speed: 14 },
 } as const satisfies Record<string, UnitStats>;
 
 export type UnitKind = keyof typeof UNITS;

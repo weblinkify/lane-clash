@@ -41,6 +41,36 @@ describe('tower destroyed', () => {
   });
 });
 
+describe('commands on the same tick', () => {
+  it('both towers finished by spells on the same tick is a draw, whichever command comes first', () => {
+    for (const order of [[0, 1], [1, 0]] as const) {
+      const state = createState();
+      state.towers[0].hp = state.towers[1].hp = CARDS.zap.towerDamage;
+      step(state, order.map((side) => play(side, 'zap', MID_X, TOWER_Y[side === 0 ? 1 : 0])));
+      expect(state.winner).toBe('draw');
+    }
+  });
+
+  it('a spell does not hit units placed on the same tick, whichever command comes first', () => {
+    for (const reversed of [false, true]) {
+      const state = createState();
+      const commands = [play(0, 'boulder', 20, 40), play(1, 'zap', 20, 40)];
+      step(state, reversed ? commands.reverse() : commands);
+      expect(state.units).toHaveLength(1);
+      expect(state.units[0]!.hp).toBe(B.hp);
+    }
+  });
+
+  it('a mirrored duel is symmetric: both units take the same damage', () => {
+    const state = createState();
+    const mine = spawnUnit(state, 'boulder', 0, MID_X, 44.9);
+    const theirs = spawnUnit(state, 'boulder', 1, MID_X, 55.1);
+    run(state, 100);
+    expect(mine.hp).toBeLessThan(B.hp);
+    expect(mine.hp).toBe(theirs.hp);
+  });
+});
+
 describe('time-out', () => {
   it('the match is still running one tick before the time limit', () => {
     const state = createState();
