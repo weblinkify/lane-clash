@@ -1,0 +1,22 @@
+services:
+  # Vite dev server, reachable from a phone on the same Wi-Fi at http://<this-computer's-ip>:5173
+  dev:
+    build: { context: ., target: deps }
+    command: npm run dev -- --host 0.0.0.0
+    ports: ['5173:5173']
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+  # Type check + unit tests with coverage
+  test:
+    build: { context: ., target: deps }
+    command: sh -c "npm run typecheck && npm run test:coverage"
+    volumes:
+      - .:/app
+      - /app/node_modules
+
+  # Production build served by nginx at http://localhost:8080
+  web:
+    build: { context: ., target: runtime }
+    ports: ['8080:80']

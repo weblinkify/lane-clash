@@ -1,0 +1,16 @@
+node_modules/
+dist/
+dev-dist/
+coverage/
+test-results/
+playwright-report/
+blob-report/
+.vercel/
+.env
+.env.*
+*.local
+*.log
+*.tsbuildinfo
+.DS_Store
+.vscode/
+.idea/
