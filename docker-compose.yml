@@ -1,3 +1,5 @@
+# Everything runs in containers. After changing package.json, add --build to rebuild the image:
+#   docker compose run --rm --build test
 services:
   # Vite dev server, reachable from a phone on the same Wi-Fi at http://<this-computer's-ip>:5173
   dev:
@@ -16,7 +18,8 @@ services:
       - .:/app
       - /app/node_modules
 
-  # Balance table: 200 bot-vs-bot matches. Flags: docker compose run --rm sim npm run sim -- --seed 7
+  # Balance table: 200 bot-vs-bot matches.
+  # Flags: docker compose run --rm sim npm run sim -- --seed 7 --matches 500
   sim:
     build: { context: ., target: deps }
     command: npm run sim
@@ -28,3 +31,40 @@ services:
   web:
     build: { context: ., target: runtime }
     ports: ['8080:80']
+
+  # Playwright smoke test against the web container, in the official Playwright image.
+  # It shares web's network so the game is at http://localhost, which browsers treat as a
+  # secure origin; the service worker needs that.
+  e2e:
+    image: mcr.microsoft.com/playwright:v1.65.1-noble
+    depends_on: [web]
+    network_mode: service:web
+    working_dir: /work
+    environment:
+      BASE_URL: http://localhost
+      CI: ${CI:-}
+    volumes:
+      - .:/work
+      - playwright_modules:/work/node_modules
+    command: sh -c "npm ci --no-audit --no-fund && npx playwright test"
+
+  # Records docs/gameplay.gif: the Playwright image plus ffmpeg.
+  gif:
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM mcr.microsoft.com/playwright:v1.65.1-noble
+        RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
+    depends_on: [web]
+    network_mode: service:web
+    working_dir: /work
+    environment:
+      BASE_URL: http://localhost
+    volumes:
+      - .:/work
+      - playwright_modules:/work/node_modules
+    command: sh -c "npm ci --no-audit --no-fund && npm run gif"
+
+volumes:
+  # Linux node_modules for the Playwright containers, kept apart from the host's.
+  playwright_modules:
