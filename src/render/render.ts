@@ -1,8 +1,10 @@
 // Draws a State. Reads only; never changes the simulation.
-import { FIELD, TOWER, UNITS } from '../sim/balance';
-import type { Side, State } from '../sim/sim';
+import { CARDS, FIELD, TICK_RATE, TOWER, UNITS, type CardId, type UnitKind } from '../sim/balance';
+import { EFFECT_TICKS, type Side, type State } from '../sim/sim';
 
 const SIDE_COLOUR: Record<Side, string> = { 0: '#3d8bfd', 1: '#f25c54' };
+/** Drawn radius of each unit, in field units. Looks only; the rules treat units as points. */
+const UNIT_RADIUS: Record<UnitKind, number> = { boulder: 3.2, slinger: 2.4, gnat: 1.5 };
 
 export interface View {
   /** CSS pixels per field unit. */
@@ -18,7 +20,8 @@ export interface View {
 export function fitCanvas(canvas: HTMLCanvasElement): View {
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
-  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  // Above 2x the extra pixels cost frame rate on mid-range phones and are not visible here.
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = Math.round(width * dpr);
   canvas.height = Math.round(height * dpr);
   const scale = Math.min(width / FIELD.width, height / FIELD.length);
@@ -48,7 +51,7 @@ function healthBar(
   colour: string,
 ): void {
   const h = Math.max(3, width * 0.12);
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
+  ctx.fillStyle = 'rgba(0,0,0,0.5)';
   ctx.fillRect(cx - width / 2, top, width, h);
   ctx.fillStyle = colour;
   ctx.fillRect(cx - width / 2, top, width * Math.max(0, Math.min(1, fraction)), h);
@@ -56,18 +59,17 @@ function healthBar(
 
 export type Positions = ReadonlyMap<number, { x: number; y: number }>;
 
-/**
- * @param previous unit positions one tick ago, for smooth motion between 20 Hz ticks
- * @param alpha how far we are from the previous tick (0) to the current one (1)
- */
-export function render(
-  ctx: CanvasRenderingContext2D,
-  view: View,
-  state: State,
-  previous: Positions,
-  alpha: number,
-  message: string,
-): void {
+export interface Frame {
+  /** Unit positions one tick ago, for smooth motion between 20 Hz ticks. */
+  previous: Positions;
+  /** How far we are from the previous tick (0) to the current one (1). */
+  alpha: number;
+  /** The card waiting to be placed, if any; its legal area is highlighted. */
+  selected: CardId | null;
+  hint: string;
+}
+
+export function render(ctx: CanvasRenderingContext2D, view: View, state: State, frame: Frame): void {
   const s = view.scale;
   ctx.setTransform(ctx.canvas.width / view.width, 0, 0, ctx.canvas.height / view.height, 0, 0);
   ctx.fillStyle = '#1b2a41';
@@ -81,6 +83,11 @@ export function render(
   ctx.fillRect(topLeft.sx, topLeft.sy, fieldW, fieldH);
   ctx.fillStyle = '#8ed47c';
   ctx.fillRect(topLeft.sx, topLeft.sy + fieldH / 2, fieldW, fieldH / 2);
+  if (frame.selected && CARDS[frame.selected].type === 'unit') {
+    // Units may only be placed in my half: dim the rest.
+    ctx.fillStyle = 'rgba(13,23,38,0.35)';
+    ctx.fillRect(topLeft.sx, topLeft.sy, fieldW, fieldH / 2);
+  }
   ctx.strokeStyle = 'rgba(255,255,255,0.7)';
   ctx.lineWidth = 2;
   ctx.setLineDash([8, 8]);
@@ -102,37 +109,70 @@ export function render(
     ctx.fill();
     ctx.font = `${r * 1.3}px system-ui, sans-serif`;
     ctx.fillText(tower.hp > 0 ? '🏰' : '💥', sx, sy);
-    healthBar(ctx, sx, sy - r - 8, r * 2.6, tower.hp / TOWER.hp, SIDE_COLOUR[tower.side]);
-    ctx.fillStyle = '#fff';
-    ctx.font = `bold ${Math.max(10, s * 2.4)}px system-ui, sans-serif`;
-    ctx.fillText(String(tower.hp), sx, sy + r + s * 2);
   }
 
   for (const unit of state.units) {
     const stats = UNITS[unit.kind];
-    const before = previous.get(unit.id) ?? unit;
-    const x = before.x + (unit.x - before.x) * alpha;
-    const y = before.y + (unit.y - before.y) * alpha;
+    const before = frame.previous.get(unit.id) ?? unit;
+    const x = before.x + (unit.x - before.x) * frame.alpha;
+    const y = before.y + (unit.y - before.y) * frame.alpha;
     const { sx, sy } = toScreen(view, x, y);
-    const r = 2.2 * s;
+    // A unit that has just attacked swells for a moment.
+    const sinceAttack = stats.attackInterval * TICK_RATE - unit.cooldown;
+    const r = UNIT_RADIUS[unit.kind] * s * (sinceAttack < 3 ? 1.25 : 1);
     ctx.fillStyle = SIDE_COLOUR[unit.side];
     ctx.beginPath();
     ctx.arc(sx, sy, r, 0, Math.PI * 2);
     ctx.fill();
     ctx.font = `${r * 1.3}px system-ui, sans-serif`;
     ctx.fillText(stats.emoji, sx, sy);
-    healthBar(ctx, sx, sy - r - 6, r * 2, unit.hp / stats.hp, '#fff');
+    if (unit.hp < stats.hp) healthBar(ctx, sx, sy - r - 6, Math.max(r * 2, 14), unit.hp / stats.hp, '#fff');
   }
 
-  if (message) {
-    ctx.font = `bold ${Math.max(14, s * 3.2)}px system-ui, sans-serif`;
-    const { sx, sy } = toScreen(view, FIELD.width / 2, FIELD.length / 2);
-    const w = ctx.measureText(message).width + 24;
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+  // Tower health is drawn over units so it stays readable in a fight.
+  for (const tower of state.towers) {
+    const { sx, sy } = toScreen(view, tower.x, tower.y);
+    const r = TOWER.radius * s;
+    const labelY = tower.side === 0 ? sy + r + s * 2 : sy - r - s * 2;
+    const barTop = tower.side === 0 ? sy - r - 8 : sy + r + 4;
+    healthBar(ctx, sx, barTop, r * 3, tower.hp / TOWER.hp, SIDE_COLOUR[tower.side]);
+    ctx.font = `800 ${Math.max(11, s * 2.6)}px system-ui, sans-serif`;
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(13,23,38,0.8)';
+    ctx.strokeText(String(tower.hp), sx, labelY);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(String(tower.hp), sx, labelY);
+  }
+
+  for (const effect of state.effects) {
+    const card = CARDS[effect.card];
+    if (card.type !== 'spell') continue;
+    const age = (state.tick - effect.tick + frame.alpha) / EFFECT_TICKS;
+    if (age >= 1) continue;
+    const { sx, sy } = toScreen(view, effect.x, effect.y);
+    const r = card.radius * s;
+    ctx.globalAlpha = 1 - age;
+    ctx.fillStyle = 'rgba(255, 221, 87, 0.45)';
     ctx.beginPath();
-    ctx.roundRect(sx - w / 2, sy - s * 3.5, w, s * 7, 10);
+    ctx.arc(sx, sy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = '#fff';
+    ctx.stroke();
+    ctx.font = `${r * (0.7 + age * 0.5)}px system-ui, sans-serif`;
+    ctx.fillText(card.emoji, sx, sy);
+    ctx.globalAlpha = 1;
+  }
+
+  if (frame.hint) {
+    ctx.font = `700 ${Math.max(13, s * 3)}px system-ui, sans-serif`;
+    const { sx, sy } = toScreen(view, FIELD.width / 2, FIELD.length * 0.3);
+    const w = ctx.measureText(frame.hint).width + 24;
+    ctx.fillStyle = 'rgba(13,23,38,0.6)';
+    ctx.beginPath();
+    ctx.roundRect(sx - w / 2, sy - s * 3.2, w, s * 6.4, 10);
     ctx.fill();
     ctx.fillStyle = '#fff';
-    ctx.fillText(message, sx, sy);
+    ctx.fillText(frame.hint, sx, sy);
   }
 }

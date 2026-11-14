@@ -12,8 +12,11 @@ export function onFieldTap(
     const { x, y } = toField(getView(), event.clientX - rect.left, event.clientY - rect.top);
     handler(x, y);
   });
-  // Belt and braces against pinch zoom, double-tap zoom and long-press menus on iOS.
-  for (const type of ['gesturestart', 'dblclick', 'contextmenu'] as const) {
+}
+
+/** Stops the page itself from reacting to touches: no zoom, scroll, pull-to-refresh or menus. */
+export function lockPageGestures(): void {
+  for (const type of ['gesturestart', 'gesturechange', 'dblclick', 'contextmenu', 'selectstart'] as const) {
     document.addEventListener(type, (event) => event.preventDefault());
   }
   document.addEventListener('touchmove', (event) => event.preventDefault(), { passive: false });
